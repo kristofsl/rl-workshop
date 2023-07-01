@@ -1,2 +1,5 @@
 # rl-workshop
-Code for introduction workshop into deep reinforcement learning
+
+An implementation of deep Q-learning in keras for the balancing pole problem.
+
+

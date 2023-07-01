@@ -1,0 +1,15 @@
+1. create a virtual environment in python
+
+python -m venv /path/to/new/virtual/environment
+
+2. activate the environment
+
+source /path/to/new/virtual/environment/bin/activate
+
+3. install all the requirements
+
+pip install -r /path/to/requirements.txt
+
+4. execute the training
+
+python balancing_pole-v3.py

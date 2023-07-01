@@ -12,4 +12,7 @@ The implementation has the following tweaks:
 - you can use the google colab version (todo)
 - you can use the docker version (todo)
 
+## Dependencies
 
+- Keeping track of the runs with MLflow
+- Hyperparameter tuning with optuna

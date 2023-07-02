@@ -78,6 +78,39 @@ def evaluate(
         steps_per_episode.append(steps)
 
     return reward_per_episode, steps_per_episode
+
+# random agent
+class RandomAgent:
+    def __init__(self, env):
+        self.env = env
+    
+    def act(self, state: np.array) -> int:
+        return self.env.action_space.sample()
+    
+def record_random_agent():
+    # trying the random agent first
+    env = gym.make('CartPole-v1',render_mode = 'rgb_array_list')
+    
+    # wrap the environment for recording
+    wrapped_env = RecordVideo(env = env, video_folder = './random-video', episode_trigger = lambda x: x % 25 == True)
+    
+    observation_space_size = wrapped_env.observation_space.shape[0]
+    
+    # create a random agent
+    random_agent = RandomAgent(wrapped_env)
+    
+    # evaluate the random agent
+    rewards, steps = evaluate(random_agent, wrapped_env, 50, observation_space_size)
+        
+    # evaluation results
+    median_steps = np.median(steps)
+    mean_steps = np.mean(steps)
+    std_steps = np.std(steps)
+        
+    print(f'median steps = {median_steps}')
+    print(f'std steps    = {std_steps}')
+    print(f'mean steps   = {mean_steps}')
+
     
 def sample_hyper_parameters(trial: optuna.trial.Trial) -> Dict:
 
@@ -223,7 +256,7 @@ def objective(trial: optuna.trial.Trial) -> float:
         deep_agent.disable_exploration()
 
         print('evaluation started')
-        rewards, steps = evaluate(deep_agent, wrapped_env, 50, 4)
+        rewards, steps = evaluate(deep_agent, wrapped_env, 50, observation_space_size)
         
         # evaluation results
         median_steps = np.median(steps)
@@ -247,9 +280,9 @@ def objective(trial: optuna.trial.Trial) -> float:
         mlflow.log_metric("std_steps", std_steps)
         mlflow.log_metric("mean_steps", mean_steps)
 
-        print(f'median reward = {median_steps}')
-        print(f'std reward    = {std_steps}')
-        print(f'mean reward   = {mean_steps}')
+        print(f'median steps = {median_steps}')
+        print(f'std steps    = {std_steps}')
+        print(f'mean steps   = {mean_steps}')
 
         # model saved as 
         deep_agent.save_model()
@@ -259,6 +292,10 @@ def objective(trial: optuna.trial.Trial) -> float:
 
         return median_reward
 
+# record a random agent    
+record_random_agent()
+
+# create an optimized model
 study_name = "rl-study"  
 storage_name = "sqlite:///{}.db".format(study_name)
 study = optuna.create_study(study_name=study_name, storage=storage_name,direction='maximize',load_if_exists=True)

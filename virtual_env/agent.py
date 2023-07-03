@@ -41,9 +41,6 @@ class DeepQAgent:
     def add_to_memory(self, state, action, reward, next_state, done):
         self.__memory.append((state, action, reward, next_state, done))
 
-    def _transfer_weights_main_to_target_model(self):  
-        self.__target_model.set_weights(self.__main_model.get_weights()) 
-
     def disable_exploration(self):
         self.__exploration_rate = 0
         self.__exploration_min = 0

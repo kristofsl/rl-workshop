@@ -16,3 +16,8 @@ pip install -r /path/to/requirements.txt
 4. execute the training
 
 python balancing_pole-v3.py
+
+Option 2 : Use google colab
+---------------------------
+
+in the colab directory you can find a google colab version of the implementation (with minor changes for recording the agent)

@@ -51,7 +51,7 @@ def evaluate(
         rewards = 0
         steps = 0
         
-        # done = environment ended badly / environment ended after 500 episodes
+        # done = environment ended badly / truncated = environment ended after 500 episodes
         done = False
         truncated = False
         
@@ -93,7 +93,8 @@ def record_random_agent():
     
     # wrap the environment for recording
     wrapped_env = RecordVideo(env = env, video_folder = './random-video', episode_trigger = lambda x: x % 25 == True)
-    
+
+    # fetch the observation dimensions from the environment
     observation_space_size = wrapped_env.observation_space.shape[0]
     
     # create a random agent
@@ -114,14 +115,31 @@ def record_random_agent():
     
 def sample_hyper_parameters(trial: optuna.trial.Trial) -> Dict:
 
+    # how many experiences do we use for one mini batch?
     batch_size = trial.suggest_categorical("batch_size", [16, 32, 64, 128, 256])
+
+    # what is the size of the memory in the memory replay mechanism? (from which we sample our mini batches)
     memory_size = trial.suggest_int("memory_size", 500, 10000)
+
+    # learning rate
     gamma = trial.suggest_float('gamma', 0.9, 0.99)
+
+    # the decay of our exploration 
     exploration_decay = trial.suggest_categorical('exploration_decay', [0.9, 0.95, 0.98, 0.99])
+
+    # size of the layers
     layer_size = trial.suggest_categorical('layer_size',[16,32,64,128,256, 512])
+
+    # a min value for exploration (during training)
     exploration_min = trial.suggest_float('exploration_min',0.001, 0.2)
+
+    # how many episodes do we use for training?
     episodes = trial.suggest_int("episodes", 150, 500)
+
+    # the learning rate for the adam optimizer / back prop
     learning_rate = trial.suggest_categorical('learning_rate',[0.001,0.0001])
+
+    # extra layers that are identical to the middle layer?
     extra_intermediate_layers = trial.suggest_categorical('extra_layers',[0,1])
 
     return {
@@ -164,12 +182,13 @@ def optimize_train(agent, env, observation_space_size, n_episodes):
             
             # enhance the signal and merge the truncated and done signals
             reward = enhance_reward_signal(next_state, reward, done, truncated, steps)
-            
+
             if done:
                 print(f'ended training episode with mistake and reward {reward} and step count {steps}')
             elif truncated:
                 print(f'ended training episode with success and reward {reward} and step count {steps}')
-            
+
+            # reshape the state 
             next_state = np.reshape(next_state, [1, observation_space_size])
 
             # add the observation to the memory
@@ -182,6 +201,7 @@ def optimize_train(agent, env, observation_space_size, n_episodes):
             state = next_state
             
 def enhance_reward_signal(next_state, reward, done, truncated, steps):
+    # enhanced reward signal to stimulate the agent to keep the pole in the middle area
     if done:
         reward = -100
     elif truncated:

@@ -33,67 +33,80 @@ class DeepQAgent:
         self.__exploration_rate = exploration_rate                      # exploration rate
         self.__exploration_min = exploration_min                        # min value for exploration
         self.__exploration_decay = exploration_decay                    # decay in the exploration rate (moving from exploration to exploitation)
-        self.__step_counter = 0                                         # keep track of the steps and update the target model after target_model_delay steps
         self.__sample_batch_size = batch_size                           # how much samples to we take for the learning step
         self.__uuid = str(uuid.uuid4())                                 # unique uid for the model
        
-
     def add_to_memory(self, state, action, reward, next_state, done):
+        # add data to the memory
         self.__memory.append((state, action, reward, next_state, done))
 
     def disable_exploration(self):
+        # disable exploration and go for exploitation 
         self.__exploration_rate = 0
         self.__exploration_min = 0
         
     def get_agent_uuid(self):
+        # return unique uuid for each created agent
         return self.__uuid   
         
     def save_model(self):
+        # save the model in case you want to load it later
         self.__model.save(f'model-{self.__uuid}.keras')
             
     def replay(self):
-        
         if len(self.__memory) <= self.__sample_batch_size:
+            # we wait until there is enough data in the memory before we start the learning proces
             return
         else:
+            # sample a random mini batch from the memory
             mini_batch = random.sample(self.__memory, self.__sample_batch_size)
 
+            # build data structures for storing the data from the batch size
             current_state = np.zeros((self.__sample_batch_size, self.__state_size))
             next_state = np.zeros((self.__sample_batch_size, self.__state_size))
             target_q_values = np.zeros((self.__sample_batch_size, self.__state_size))
-
             action = np.zeros(self.__sample_batch_size, dtype=int)
             reward = np.zeros(self.__sample_batch_size)
             done = np.zeros(self.__sample_batch_size,dtype=bool)
 
+            # fill the data structures with the data from our memory
             for i in range(self.__sample_batch_size):
                 current_state[i] = mini_batch[i][0]   # state
                 action[i] = mini_batch[i][1]          # action
                 reward[i] = mini_batch[i][2]          # reward
                 next_state[i] = mini_batch[i][3]      # next_state
                 done[i] = mini_batch[i][4]            # done
-                                         
+
+            # use the current state (first state) to predict both output values (action space values)
             target = self.__model.predict(current_state,verbose=0)
+
+            # use the next state (state after taking the action for which we know the result) to predict both output values (action space values)
             Qvalue_ns = self.__model.predict(next_state,verbose=0)
 
+            # for each sample in the mini batch
             for i in range(self.__sample_batch_size):
                 if done[i]:
+                    # the reward was either truncated or done so there is no need to look further and we update the target from our first prediction with information about the action we actually took
                     target[i][action[i]] = reward[i]
                 else:
+                    # the reward was not final we enhanche so we update the target from our first prediction with information about the action we actually took and the prediction from our new state
                     target[i][action[i]] = reward[i] + self.__gamma * (np.amax(Qvalue_ns[i]))
 
-
+            # we ask the model to optimize itself using the first state and the target information that is enhanced with information that we gained through experience
             self.__model.fit(current_state, target, batch_size=self.__sample_batch_size, epochs=1, verbose=0)
 
+            # we use the decay factor to reduce our chance of exploration if we are not on the lower limit
             if self.__exploration_rate > self.__exploration_min:
                 self.__exploration_rate *= self.__exploration_decay
             
 
     def act(self, state: np.array) -> int:
         if np.random.rand() < self.__exploration_rate:
+            # take a random action
             random_action = self.__env.action_space.sample()
             return random_action
         else:    
+            # use the model to make a prediction 
             actions = self.__model.predict(state, verbose=0)             # get a model prediction                   
             best_action = np.argmax(actions[0])                          # get the output index with the highest value
             return best_action

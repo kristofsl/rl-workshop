@@ -16,6 +16,14 @@ from keras.layers import Dense
 from keras.optimizers import Adam
 import os
 import uuid
+import gc
+from keras.callbacks import Callback 
+
+class MemoryClear(Callback):
+    def on_epoch_end(self, epoch, logs=None):
+        gc.collect()
+        
+memory_clear_callback = MemoryClear() 
 
 class DeepQAgent:
     
@@ -23,6 +31,7 @@ class DeepQAgent:
         self.__env = env
         self.__state_size = 4                                           # we have an 4 numbers that represent our size and this will be the input for our neural net
         self.__action_size = 2                                          # we have 2 possible actions (push the card to the left or to the right)
+        self.__memory_size = memory_size
         self.__memory = deque(maxlen=memory_size)                       # memory for storing our experiences
         self.__layer_size_1 = layer_size                                # nn layer 1 width
         self.__layer_size_2 = layer_size                                # nn layer 2 width
@@ -47,7 +56,7 @@ class DeepQAgent:
         
     def get_agent_uuid(self):
         # return unique uuid for each created agent
-        return self.__uuid   
+        return self.__uuid    
         
     def save_model(self):
         # save the model in case you want to load it later
@@ -56,6 +65,7 @@ class DeepQAgent:
     def replay(self):
         if len(self.__memory) <= self.__sample_batch_size:
             # we wait until there is enough data in the memory before we start the learning proces
+            print(f'not enought in memory for learning {len(self.__memory)} - {self.__sample_batch_size}')
             return
         else:
             # sample a random mini batch from the memory
@@ -77,23 +87,20 @@ class DeepQAgent:
                 next_state[i] = mini_batch[i][3]      # next_state
                 done[i] = mini_batch[i][4]            # done
 
-            # use the current state (first state) to predict both output values (action space values)
+            # use the current state to predict both output values (action space values)
             target = self.__model.predict(current_state,verbose=0)
 
-            # use the next state (state after taking the action for which we know the result) to predict both output values (action space values)
+            # use the next state to predict both output values (action space values)
             Qvalue_ns = self.__model.predict(next_state,verbose=0)
 
             # for each sample in the mini batch
             for i in range(self.__sample_batch_size):
                 if done[i]:
-                    # the reward was either truncated or done so there is no need to look further and we update the target from our first prediction with information about the action we actually took
                     target[i][action[i]] = reward[i]
                 else:
-                    # the reward was not final we enhanche so we update the target from our first prediction with information about the action we actually took and the prediction from our new state
                     target[i][action[i]] = reward[i] + self.__gamma * (np.amax(Qvalue_ns[i]))
 
-            # we ask the model to optimize itself using the first state and the target information that is enhanced with information that we gained through experience
-            self.__model.fit(current_state, target, batch_size=self.__sample_batch_size, epochs=1, verbose=0)
+            self.__model.fit(current_state, target, batch_size=self.__sample_batch_size, epochs=1, verbose=0,callbacks=[memory_clear_callback])
 
             # we use the decay factor to reduce our chance of exploration if we are not on the lower limit
             if self.__exploration_rate > self.__exploration_min:

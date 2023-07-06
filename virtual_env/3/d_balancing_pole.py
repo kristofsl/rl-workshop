@@ -26,7 +26,7 @@ import optuna
 from optuna.importance import get_param_importances
 import uuid
 import mlflow
-from agent import *
+from d_agent import *
 
 ML_FLOW_EXPERIMENT_ID = mlflow.create_experiment("mlflow-rl-balancing-tracking-"+str(uuid.uuid4()))
 
@@ -116,10 +116,10 @@ def record_random_agent():
 def sample_hyper_parameters(trial: optuna.trial.Trial) -> Dict:
 
     # how many experiences do we use for one mini batch?
-    batch_size = trial.suggest_categorical("batch_size", [16, 32, 64, 128, 256])
+    batch_size = trial.suggest_categorical("batch_size", [16, 32, 64, 128])
 
     # what is the size of the memory in the memory replay mechanism? (from which we sample our mini batches)
-    memory_size = trial.suggest_int("memory_size", 500, 10000)
+    memory_size = trial.suggest_int("memory_size", 500, 5000)
 
     # learning rate
     gamma = trial.suggest_float('gamma', 0.9, 0.99)
@@ -128,7 +128,7 @@ def sample_hyper_parameters(trial: optuna.trial.Trial) -> Dict:
     exploration_decay = trial.suggest_categorical('exploration_decay', [0.9, 0.95, 0.98, 0.99])
 
     # size of the layers
-    layer_size = trial.suggest_categorical('layer_size',[16,32,64,128,256, 512])
+    layer_size = trial.suggest_categorical('layer_size',[16,32,64,128])
 
     # a min value for exploration (during training)
     exploration_min = trial.suggest_float('exploration_min',0.001, 0.2)
@@ -140,7 +140,10 @@ def sample_hyper_parameters(trial: optuna.trial.Trial) -> Dict:
     learning_rate = trial.suggest_categorical('learning_rate',[0.001,0.0001])
 
     # extra layers that are identical to the middle layer?
-    extra_intermediate_layers = trial.suggest_categorical('extra_layers',[0,1])
+    extra_intermediate_layers = trial.suggest_categorical('extra_layers',[0])
+
+    # update the target model with the main model information
+    update_model_steps = trial.suggest_categorical('update_model_steps',[10, 20, 50])
 
     return {
         'batch_size': batch_size,
@@ -151,7 +154,8 @@ def sample_hyper_parameters(trial: optuna.trial.Trial) -> Dict:
         'exploration_min' : exploration_min,
         'episodes' : episodes,
         'learning_rate' : learning_rate,
-        'extra_intermediate_layers' : extra_intermediate_layers
+        'extra_intermediate_layers' : extra_intermediate_layers,
+        'update_model_steps' : update_model_steps
     }    
     
 # train loop for the deep q agent
@@ -163,11 +167,21 @@ def optimize_train(agent, env, observation_space_size, n_episodes):
         state = np.reshape(env.reset()[0], [1, observation_space_size])
         
         print(f'new train episode {i} on : {datetime.datetime.now()}')
+
+        # reset the internal state (learning counter)
+        agent.reset_episode()
         
         # initialize done (fail) and truncated (success)
         done = False
         truncated = False
         
+         # execute the garbase collector
+        gc.collect()
+
+        # clear all the memory
+        keras.backend.clear_session()
+
+        # logging purpose counter
         steps = 0
         
         while not (done or truncated):
@@ -183,10 +197,9 @@ def optimize_train(agent, env, observation_space_size, n_episodes):
             # enhance the signal and merge the truncated and done signals
             reward = enhance_reward_signal(next_state, reward, done, truncated, steps)
 
-            if done:
-                print(f'ended training episode with mistake and reward {reward} and step count {steps}')
-            elif truncated:
-                print(f'ended training episode with success and reward {reward} and step count {steps}')
+            if done or truncated:
+                mlflow.log_metric(key="episode_steps", value=steps, step=i)
+                print(f'ended training episode with done {done} - truncated {truncated} - reward {reward} - step count {steps}')
 
             # reshape the state 
             next_state = np.reshape(next_state, [1, observation_space_size])
@@ -219,7 +232,7 @@ def objective(trial: optuna.trial.Trial) -> float:
     env = gym.make('CartPole-v1',render_mode = 'rgb_array_list')
     
     # wrap the environment for recording
-    wrapped_env = RecordVideo(env = env, video_folder = './video', episode_trigger = lambda x: x % 25 == True)
+    wrapped_env = RecordVideo(env = env, video_folder = './video', episode_trigger = lambda x: x % 50 == True)
     
     # fetch properties from environment
     observation_space_size = wrapped_env.observation_space.shape[0]
@@ -243,84 +256,88 @@ def objective(trial: optuna.trial.Trial) -> float:
         batch_size = args['batch_size'],
         exploration_min = args['exploration_min'],
         learning_rate = args['learning_rate'],
+        update_model_steps = args['update_model_steps'],
         extra_intermediate_layers = args['extra_intermediate_layers']
     )
     
     RUN_NAME = f"run_{deep_agent.get_agent_uuid()}"
     
-    with mlflow.start_run(experiment_id=ML_FLOW_EXPERIMENT_ID, run_name=RUN_NAME) as run:
-        print('train loop started')    
-        
-        # reset all
-        env.reset()
-        wrapped_env.reset()
+    mlflow.start_run(experiment_id=ML_FLOW_EXPERIMENT_ID, run_name=RUN_NAME)
+    print('train loop started')    
     
-        # log the optuna parameters
-        mlflow.log_param("memory_size", args['memory_size'])
-        mlflow.log_param("gamma", args['gamma'])
-        mlflow.log_param("exploration_decay", args['exploration_decay'])
-        mlflow.log_param("layer_size", args['layer_size'])
-        mlflow.log_param("batch_size", args['batch_size'])
-        mlflow.log_param("exploration_min", args['exploration_min'])
-        mlflow.log_param("episodes", args['episodes'])
-        mlflow.log_param("learning_rate", args['learning_rate'])
-        mlflow.log_param("extra_intermediate_layers", args['extra_intermediate_layers'])
-        
-        # log the agent uid
-        mlflow.log_param("agent_uid", deep_agent.get_agent_uuid())
-        
-        # train loop
-        optimize_train(deep_agent,env, observation_space_size,n_episodes=args['episodes'])
+    # reset all
+    env.reset()
+    wrapped_env.reset()
 
-        # disable exploitation and only rely on the model for decisions
-        deep_agent.disable_exploration()
+    # log the optuna parameters
+    mlflow.log_param("memory_size", args['memory_size'])
+    mlflow.log_param("gamma", args['gamma'])
+    mlflow.log_param("exploration_decay", args['exploration_decay'])
+    mlflow.log_param("layer_size", args['layer_size'])
+    mlflow.log_param("batch_size", args['batch_size'])
+    mlflow.log_param("exploration_min", args['exploration_min'])
+    mlflow.log_param("episodes", args['episodes'])
+    mlflow.log_param("learning_rate", args['learning_rate'])
+    mlflow.log_param("extra_intermediate_layers", args['extra_intermediate_layers'])
+    mlflow.log_param("update_model_steps", args['update_model_steps'])
+    
+    # log the agent uid
+    mlflow.log_param("agent_uid", deep_agent.get_agent_uuid())
+    
+    # train loop
+    optimize_train(deep_agent,env, observation_space_size,n_episodes=args['episodes'])
 
-        print('evaluation started')
-        rewards, steps = evaluate(deep_agent, wrapped_env, 50, observation_space_size)
-        
-        # evaluation results
-        median_steps = np.median(steps)
-        mean_steps = np.mean(steps)
-        std_steps = np.std(steps)
-        
-        median_reward = np.median(rewards)
-        mean_reward = np.mean(rewards)
-        std_reward= np.std(rewards)
-        
-        # Track metrics
-        mlflow.log_metric("median_reward", median_reward)
-        mlflow.log_metric("std_reward", std_reward)
-        mlflow.log_metric("mean_reward", mean_reward)
+    # disable exploitation and only rely on the model for decisions
+    deep_agent.disable_exploration()
 
-        print(f'median reward = {median_reward}')
-        print(f'std reward    = {std_reward}')
-        print(f'mean reward   = {mean_reward}')
-        
-        mlflow.log_metric("median_steps", median_steps)
-        mlflow.log_metric("std_steps", std_steps)
-        mlflow.log_metric("mean_steps", mean_steps)
+    print('evaluation started')
+    rewards, steps = evaluate(deep_agent, wrapped_env, 50, observation_space_size)
+    
+    # evaluation results
+    median_steps = np.median(steps)
+    mean_steps = np.mean(steps)
+    std_steps = np.std(steps)
+    
+    median_reward = np.median(rewards)
+    mean_reward = np.mean(rewards)
+    std_reward= np.std(rewards)
+    
+    # Track metrics
+    mlflow.log_metric("median_reward", median_reward)
+    mlflow.log_metric("std_reward", std_reward)
+    mlflow.log_metric("mean_reward", mean_reward)
 
-        print(f'median steps = {median_steps}')
-        print(f'std steps    = {std_steps}')
-        print(f'mean steps   = {mean_steps}')
+    print(f'median reward = {median_reward}')
+    print(f'std reward    = {std_reward}')
+    print(f'mean reward   = {mean_reward}')
+    
+    mlflow.log_metric("median_steps", median_steps)
+    mlflow.log_metric("std_steps", std_steps)
+    mlflow.log_metric("mean_steps", mean_steps)
 
-        # model saved as 
-        deep_agent.save_model()
-        
-        # clear all the memory
-        keras.backend.clear_session()
+    print(f'median steps = {median_steps}')
+    print(f'std steps    = {std_steps}')
+    print(f'mean steps   = {mean_steps}')
 
-        return median_reward
+    # model saved as 
+    deep_agent.save_model()
+    
+    # clear all the memory
+    keras.backend.clear_session()
+    
+    mlflow.end_run()
+
+    return median_reward
 
 # record a random agent    
 record_random_agent()
 
 # create an optimized model
-study_name = "rl-study"  
+study_name = "rl-study-double"  
 storage_name = "sqlite:///{}.db".format(study_name)
 study = optuna.create_study(study_name=study_name, storage=storage_name,direction='maximize',load_if_exists=True)
 
-study.optimize(objective, n_trials=50, gc_after_trial=True)
+study.optimize(objective, n_trials=5, gc_after_trial=True)
 
 # print param importances
 print(get_param_importances(study))

@@ -1,6 +1,0 @@
-artifact_location: file:///Users/kristofslechten/Documents/VirtualPythonEnv/workshop-rl/rl-workshop/virtual_env/3/mlruns/537602500218964801
-creation_time: 1688676156918
-experiment_id: '537602500218964801'
-last_update_time: 1688676156918
-lifecycle_stage: active
-name: mlflow-rl-balancing-tracking-c2be3232-0232-476a-bf8b-4fa2ecd55830

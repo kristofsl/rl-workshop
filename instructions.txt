@@ -15,7 +15,11 @@ pip install -r /path/to/requirements.txt
 
 4. execute the training
 
-python balancing_pole-v3.py
+python d_balancing_pole.py
+
+or 
+
+python d_lunar.py
 
 Option 2 : Use google colab
 ---------------------------
